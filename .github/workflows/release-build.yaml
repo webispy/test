@@ -1,0 +1,33 @@
+name: Build for Release
+on:
+  release:
+    types:
+      - created
+
+env:
+  REPO: nugu-linux
+  REPOSLUG: nugu-developers/nugu-linux
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Done
+      run:
+        echo "Build start and upload artifact"
+    - name: Generate CHANGES.txt
+      run: |
+        # Remove "refs/tags/" from "refs/tags/xxxxxxx"
+        SHORTSHA=$(echo ${GITHUB_REF} | cut -c11-)
+        git clone https://github.com/${REPOSLUG}
+        cd ${REPO}
+        git checkout ${SHORTSHA}
+        git reset --hard
+        git log $(git describe --tags --abbrev=0)..HEAD --oneline > ../CHANGES.txt
+        cd ..
+        cat CHANGES.txt
+    - name: Upload
+      uses: shogo82148/actions-upload-release-asset@v1
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: CHANGES.txt
