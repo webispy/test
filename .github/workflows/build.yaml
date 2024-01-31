@@ -1,0 +1,54 @@
+name: Build
+on:
+  push:
+    branches:
+      - artifact
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          [
+            bionic_x64,
+            focal_arm64,
+            jammy_armhf
+          ]
+    steps:
+      - name: generate ${{ matrix.target }}
+        run: |
+          mkdir -p /tmp/result
+          echo "${{ matrix.target }}" > /tmp/result/test_${{ matrix.target }}.deb
+          echo "${{ matrix.target }}" > /tmp/result/test-dbg_${{ matrix.target }}.deb
+          echo "* ${{ matrix.target }} done" >> $GITHUB_STEP_SUMMARY
+          echo "## 2deps" >> $GITHUB_STEP_SUMMARY
+          echo "### 3deps" >> $GITHUB_STEP_SUMMARY
+          echo "#### 4deps" >> $GITHUB_STEP_SUMMARY
+          echo "<pre>$(tree --du /tmp/result)</pre>" >> $GITHUB_STEP_SUMMARY
+      - name: Build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.target }}.zip
+          path: /tmp/result/*.deb
+
+  pages:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/debs
+          merge-multiple: true
+      - name: test
+        run: |
+          ls -l /tmp/debs
+      - name: list
+        run: |
+          FILES=$(ls /tmp/debs)
+          for item in $FILES
+          do
+            echo "item: ${item}"
+          done
