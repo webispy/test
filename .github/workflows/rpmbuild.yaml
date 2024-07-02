@@ -1,0 +1,91 @@
+name: rpmbuild
+on:
+  workflow_dispatch:
+    inputs:
+      comment:
+        description: 'Comment'
+        required: false
+        default: ''
+
+jobs:
+  fedora:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          path: src
+      - name: Update
+        run: dnf update -y
+      - name: Install
+        run: dnf install -y wget tree unzip
+      - name: Download target source
+        run: |
+          wget https://github.com/webispy/aln/archive/refs/heads/master.zip
+          unzip master.zip
+      - name: test
+        run: |
+          pwd
+          ls -l
+          whoami
+      - run: dnf install -y rpm-build dnf-plugins-core
+      - run: dnf builddep -y packaging/aln.spec
+        working-directory: aln-master
+      - run: rpmbuild -bb --build-in-place packaging/aln.spec
+        working-directory: aln-master
+      - run: ls -l $HOME/rpmbuild/RPMS/x86_64/*.rpm
+      - name: Build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: /github/home/rpmbuild/RPMS/x86_64/*.rpm
+
+  mock:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        host: [x86_64, aarch64]
+      fail-fast: false
+    services:
+      qemu:
+        image: multiarch/qemu-user-static:latest
+        options: --privileged
+    container:
+      image: fedora:latest
+      volumes:
+        - /var/lib/mock
+      options: --privileged
+    steps:
+      - run: dnf update -y
+      - run: dnf install -y wget tree unzip qemu-user-static
+      - name: Download target source
+        run: |
+          wget https://github.com/webispy/aln/archive/refs/heads/master.zip
+          unzip master.zip
+          mv aln-master aln
+          tar cvfz aln.tar.gz aln
+      - run: dnf install -y rpm-build dnf-plugins-core mock fuse-overlayfs
+      - name: Fix podman
+        run: |
+          mkdir -p ~/.config/containers
+          cat <<EOF > ~/.config/containers/storage.conf
+          [storage]
+          driver = "overlay"
+          [storage.options]
+          mount_program = "/usr/bin/fuse-overlayfs"
+          EOF
+      - run: mock -r fedora-40-${{ matrix.host }} --init
+      - run: mock -r fedora-40-${{ matrix.host }} --spec=aln/packaging/aln.spec --sources=. --resultdir=. --buildsrpm
+      - run: mock -r fedora-40-${{ matrix.host }} --resultdir=. --rebuild aln-*.src.rpm
+      - name: Genereate repo
+        run: |
+          mkdir repo
+          mv *.rpm repo
+          createrepo repo
+      - name: Upload repo artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fedora-40-${{ matrix.host }}
+          path: repo/*

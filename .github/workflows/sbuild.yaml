@@ -1,0 +1,69 @@
+name: sbuild
+on:
+  workflow_dispatch:
+    inputs:
+      comment:
+        description: 'Comment'
+        required: false
+        default: ''
+
+jobs:
+  sbuild:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dist: [jammy, focal]
+        host: [armhf, arm64, amd64]
+      fail-fast: false
+    steps:
+      - name: Download target source
+        run: |
+          wget https://github.com/webispy/aln/archive/refs/heads/master.zip
+          unzip master.zip
+          cd aln-master
+          cp -a packaging/${{ matrix.dist }} debian
+      - run: sudo apt update
+      - run: sudo apt install -y sbuild ubuntu-dev-tools debhelper
+      - run: sudo sbuild-adduser $USER
+      - name: Setup tmpfs overlay
+        run: |
+          cat <<EOF > 04tmpfs
+          #!/bin/sh
+
+          set -e
+
+          . "\$SETUP_DATA_DIR/common-data"
+          . "\$SETUP_DATA_DIR/common-functions"
+          . "\$SETUP_DATA_DIR/common-config"
+
+          if [ "\$STAGE" = "setup-start" ]; then
+            mount -t tmpfs overlay /var/lib/schroot/union/overlay
+          elif [ "\$STAGE" = "setup-recover" ]; then
+            mount -t tmpfs overlay /var/lib/schroot/union/overlay
+          elif [ "\$STAGE" = "setup-stop" ]; then
+            umount -f /var/lib/schroot/union/overlay
+          fi
+          EOF
+
+          chmod +x 04tmpfs
+          sudo mv 04tmpfs /etc/schroot/setup.d/
+      - name: Make chroot env with cross-compile
+        if: ${{ matrix.host != 'amd64' }}
+        run: |
+          echo "CHROOT=${{ matrix.dist }}-amd64-${{ matrix.host }}" >> $GITHUB_ENV
+          sg sbuild -c 'mk-sbuild --target ${{ matrix.host }} ${{ matrix.dist }}'
+      - name: Make chroot env
+        if: ${{ matrix.host == 'amd64' }}
+        run: |
+          echo "CHROOT=${{ matrix.dist }}-${{ matrix.host }}" >> $GITHUB_ENV
+          sg sbuild -c 'mk-sbuild ${{ matrix.dist }}'
+      - run: sudo sbuild-update --upgrade $CHROOT
+      - run: sudo sbuild-apt $CHROOT apt-get install ca-certificates apt-transport-https
+      - run: sg sbuild -c 'sbuild --chroot $CHROOT --host ${{ matrix.host }}'
+        working-directory: aln-master
+      - run: ls -l
+      - name: Build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.dist }}-${{ matrix.host }}
+          path: ./*.deb
